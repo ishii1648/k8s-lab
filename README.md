@@ -1,19 +1,5 @@
 # k8s-lab
 
-macOS上でkindを使用したKubernetesラボ環境（Istio Ambient Mesh）
-
-## Istio Ambient Meshとは
-
-Ambient Meshはサイドカープロキシ不要の新しいデータプレーンモードです：
-
-- **ztunnel**: L4ノードプロキシ（DaemonSet）- mTLS、認証を担当
-- **waypoint proxy**: L7プロキシ（オプション）- HTTPルーティング、認可ポリシー
-
-従来のサイドカーモードと比較して：
-- リソース消費が少ない
-- アプリケーションの再起動不要
-- シンプルな運用
-
 ## 前提条件
 
 以下のツールがインストールされている必要があります：
