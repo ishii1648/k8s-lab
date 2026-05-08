@@ -1,0 +1,28 @@
+# Root Application for the app-of-apps pattern.
+# Watches apps/ in this Git repo and syncs every nested ArgoCD Application manifest.
+# Each leaf Application then manages its own workload manifests.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ishii1648/k8s-lab.git
+    targetRevision: HEAD
+    path: apps
+    directory:
+      recurse: true
+      include: "**/application.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

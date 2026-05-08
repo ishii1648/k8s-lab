@@ -1,1 +1,6 @@
 .claude/settings.local.json
+
+# Local kubeconfig snapshots and lima caches occasionally end up here when scripts misbehave.
+*.kubeconfig
+kubeconfig
+.lima/

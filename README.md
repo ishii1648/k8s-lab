@@ -1,117 +1,136 @@
 # k8s-lab
 
+Mac mini (Apple Silicon) 上で個人アプリを常駐運用する Homelab Kubernetes 環境。
+
+- **VM**: Lima (Apple Virtualization.framework, 4 vCPU / 6 GiB / 40 GiB)
+- **Cluster**: k3s single-node (traefik / metrics-server / local-path-provisioner 同梱)
+- **GitOps**: ArgoCD (HA なし最小構成、app-of-apps)
+
 ## 前提条件
 
-以下のツールがインストールされている必要があります：
-
-- [kind](https://kind.sigs.k8s.io/) - Kubernetes in Docker
-- [kubectl](https://kubernetes.io/docs/tasks/tools/) - Kubernetes CLI
-- [helm](https://helm.sh/) - Kubernetes package manager
-- [helmfile](https://helmfile.readthedocs.io/) - Declarative spec for Helm charts
-
-### インストール（Homebrew）
-
-```bash
-brew install kind kubectl helm helmfile
+```fish
+brew install lima kubectl
 ```
+
+`make check` で確認できる。
 
 ## クイックスタート
 
-```bash
-# 前提条件の確認
-make check
-
-# クラスター作成
-make create-cluster
-
-# Istioインストール（Gateway API CRDsも自動インストール）
-make install-istio
-
-# ステータス確認
-make status
+```fish
+make check        # ツール存在確認
+make up           # Lima VM 起動 + k3s 自動インストール
+make kubeconfig   # ~/.kube/config に k3s-lab コンテキストを merge
+make bootstrap    # ArgoCD インストール + root Application 適用
+make status       # 全体ステータス確認
 ```
 
-## Ambient Meshの有効化
+`make all` は上記を順に流す。
 
-namespace単位でAmbient Meshを有効化します：
+サンプルアプリの動作確認:
 
-```bash
-kubectl label namespace default istio.io/dataplane-mode=ambient
+```fish
+kubectl -n hello-world wait --for=condition=Available deployment/hello-world --timeout=120s
+kubectl -n hello-world port-forward svc/hello-world 8080:80
+# 別ターミナルで
+curl http://localhost:8080
+# → "hello from k3s on lima"
 ```
 
-## ポートマッピング
+## ArgoCD UI
 
-| サービス | ホストポート | NodePort | 用途 |
-|---------|------------|----------|------|
-| HTTP    | 8080       | 30080    | Istio Ingress Gateway HTTP |
-| HTTPS   | 8443       | 30443    | Istio Ingress Gateway HTTPS |
-| Status  | 15021      | 30021    | Istio ヘルスチェック |
-
-## コマンド一覧
-
-```bash
-make help              # ヘルプ表示
-make check             # 前提条件確認
-make create-cluster    # クラスター作成
-make delete-cluster    # クラスター削除
-make install-gateway-api # Gateway API CRDsインストール
-make install-istio     # Istioインストール
-make uninstall-istio   # Istioアンインストール
-make status            # ステータス確認
-make all               # 全ステップ実行
+```fish
+make argocd-password   # 初期 admin パスワードを表示
+make argocd-ui         # https://localhost:8080 で port-forward
 ```
 
-## ディレクトリ構造
+ブラウザで `https://localhost:8080` を開き、`admin` + 上記パスワードでログイン。
+
+## ライフサイクル
+
+| 操作 | コマンド | 影響 |
+|---|---|---|
+| 一時停止 (Mac 再起動など) | `make down` | VM 停止のみ。data 保持 |
+| 再開 | `make up` | 既存 VM を起動、k3s も自動再起動 |
+| 完全破棄 | `make destroy` | VM とその中の全データを削除 |
+
+## ディレクトリ構成
 
 ```
-k8s-lab/
+.
+├── Makefile                    # 主要操作 (make help で一覧)
 ├── README.md
-├── Makefile
-├── scripts/
-│   └── check-prerequisites.sh
-├── kind/
-│   └── kind-config.yaml
-└── helmfile/
-    ├── helmfile.yaml
-    └── values/
-        ├── istio-base.yaml
-        ├── istio-cni.yaml
-        ├── istio-gateway.yaml
-        ├── istiod.yaml
-        └── ztunnel.yaml
+├── docs/
+│   └── issues.md               # 受け入れ条件と検証手順
+├── lima/
+│   └── k3s.yaml                # Lima VM 定義
+├── bootstrap/
+│   ├── fetch-kubeconfig.sh     # kubeconfig をホストへ merge
+│   └── install-argocd.sh       # ArgoCD + root Application 適用
+├── infra/
+│   ├── argocd/                 # ArgoCD 自身 (ArgoCD では管理しない)
+│   │   ├── README.md
+│   │   └── namespace.yaml
+│   └── root-app/
+│       └── root-application.yaml   # apps/ を再帰 sync
+├── apps/
+│   ├── README.md
+│   └── hello-world/            # サンプル個人アプリ (echo server)
+│       ├── application.yaml
+│       └── manifests/
+│           ├── deployment.yaml
+│           └── service.yaml
+└── scripts/
+    └── check-prerequisites.sh
 ```
 
-## コンポーネント
+## 新しいアプリを追加する
 
-| コンポーネント | 説明 |
-|---------------|------|
-| istio-base | Istio CRDs |
-| istiod | コントロールプレーン（Ambient mode） |
-| istio-cni | CNIプラグイン（Ambient mode必須） |
-| ztunnel | L4ノードプロキシ（DaemonSet） |
-| istio-ingressgateway | Ingress Gateway |
+1. `apps/<app-name>/manifests/` に Kubernetes リソースを置く
+2. `apps/<app-name>/application.yaml` で ArgoCD Application を宣言 (`apps/hello-world/application.yaml` をコピーして書き換えるのが速い)
+3. `git push` する
+
+root Application が自動で検出して sync する。
+
+## 設計上の判断
+
+| 決定 | 理由 |
+|---|---|
+| Lima を選択 (Vagrant/VirtualBox 不採用) | Apple Silicon ネイティブで安定動作。Mac 再起動でも VM 永続化 |
+| k3s 単独 (kind 不採用) | VM 永続性 + 単一バイナリの軽量さ。idle ~600-900 MB |
+| Karpenter/kwok 不採用 | 個人アプリ用途ではノードオートスケール不要。kwok 偽ノードは実アプリが動かない |
+| ArgoCD HA なし | 冗長化のメリットより RAM 節約を優先 |
+| ingress / cert-manager なし (現時点) | 当面 `kubectl port-forward` で十分。必要になれば後追加 |
+
+## メモリ見積
+
+| 項目 | 想定 RAM |
+|---|---|
+| Lima VM オーバーヘッド | ~200-400 MB |
+| k3s + 同梱コンポーネント | ~600-900 MB |
+| ArgoCD (server/repo-server/application-controller/redis 等) | ~700-900 MB |
+| 個人アプリ用バッファ | ~3.5-4 GB |
 
 ## トラブルシューティング
 
-### ポート8080/8443が使用中の場合
+### `make up` で VM が起動しない
 
-他のサービスがポートを使用している場合は、`kind/kind-config.yaml`の`hostPort`を変更してください。
-
-### Istioが起動しない場合
-
-リソース不足の可能性があります。Docker Desktopのメモリ設定を確認してください（推奨: 8GB以上）。
-
-### クラスターの再作成
-
-```bash
-make delete-cluster
-make create-cluster
-make install-istio
+```fish
+limactl list                         # 状態確認
+limactl shell k3s-lab -- journalctl -u k3s --no-pager | tail -100
 ```
 
-### ztunnelの確認
+`vmType: vz` が動かない場合は `lima/k3s.yaml` の `vmType` を `qemu` に変更して再作成。
 
-```bash
-kubectl get daemonset -n istio-system ztunnel
-kubectl logs -n istio-system -l app=ztunnel
+### kubectl が `dial tcp 127.0.0.1:6443: connect: connection refused`
+
+VM が止まっている可能性。`make up` で起動。
+それでもダメなら `limactl shell k3s-lab -- sudo systemctl status k3s` で k3s デーモンを確認。
+
+### ArgoCD が apps を sync しない
+
+```fish
+kubectl -n argocd get applications
+kubectl -n argocd describe application root
 ```
+
+`repoURL` の到達性、認証 (private repo の場合は別途設定が必要) を確認する。
