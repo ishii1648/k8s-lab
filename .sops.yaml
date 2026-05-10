@@ -1,0 +1,12 @@
+# SOPS encryption rules for this repository.
+# Files matching `*.enc.yaml` are encrypted with the age public key below.
+# The corresponding private key lives only in:
+#   - the maintainer's ~/.config/sops/age/keys.txt (for editing)
+#   - the cluster Secret `sops-age` in namespace `sops-secrets-operator` (for runtime decryption)
+#
+# To rotate the key: generate a new keypair, re-encrypt all *.enc.yaml with `sops updatekeys`,
+# update both this file and the cluster Secret.
+creation_rules:
+  - path_regex: .*\.enc\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: age1w0w47shfc9mntx8rgzqjq8qc500cmunxj7pq8nfdt40wjn2gjqzq0c3m9d
