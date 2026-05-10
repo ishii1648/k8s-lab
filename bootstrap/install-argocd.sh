@@ -25,7 +25,9 @@ echo "==> Creating namespace ${ARGOCD_NAMESPACE}"
 kubectl apply -f "${REPO_ROOT}/infra/argocd/namespace.yaml"
 
 echo "==> Installing ArgoCD (${ARGOCD_VERSION})"
-kubectl apply -n "${ARGOCD_NAMESPACE}" \
+# Server-side apply avoids the 262144-byte limit that client-side apply hits
+# on large ArgoCD CRDs (notably applicationsets.argoproj.io).
+kubectl apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" \
   -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 
 echo "==> Waiting for ArgoCD components to become available"
