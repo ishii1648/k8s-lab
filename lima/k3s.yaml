@@ -1,0 +1,72 @@
+# Lima VM template for k3s single-node Homelab cluster.
+# Apply with:  limactl start --name=k3s-lab ./lima/k3s.yaml
+#
+# Notes:
+# - vmType: vz uses Apple's Virtualization.framework (Apple Silicon native, lighter than qemu).
+# - k3s is installed during provisioning. The kubeconfig is exposed at /etc/rancher/k3s/k3s.yaml.
+# - Host port 6443 is forwarded to the guest so kubectl on the host can reach the API server.
+
+vmType: vz
+arch: aarch64
+os: Linux
+
+cpus: 4
+memory: 6GiB
+disk: 40GiB
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: aarch64
+
+mounts:
+  - location: "~"
+    writable: false
+
+networks:
+  - vzNAT: true
+
+portForwards:
+  # k3s API server. The fetched kubeconfig points at 127.0.0.1:6443 on the host.
+  - guestPort: 6443
+    hostIP: "127.0.0.1"
+    hostPort: 6443
+
+provision:
+  # Install k3s as a single-node server with a stable channel.
+  # --write-kubeconfig-mode 644 lets the lima user read the kubeconfig without sudo.
+  # --disable traefik is intentional kept commented so the bundled ingress stays available.
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if command -v k3s >/dev/null 2>&1; then
+        echo "k3s already installed, skipping"
+        exit 0
+      fi
+      curl -sfL https://get.k3s.io | \
+        INSTALL_K3S_CHANNEL=stable \
+        K3S_KUBECONFIG_MODE=644 \
+        sh -s - server \
+          --write-kubeconfig-mode 644 \
+          --tls-san 127.0.0.1
+
+probes:
+  - description: "k3s is ready"
+    script: |
+      #!/bin/bash
+      set -eu -o pipefail
+      timeout 120s bash -c 'until [ -f /etc/rancher/k3s/k3s.yaml ]; do sleep 2; done'
+      timeout 120s bash -c 'until k3s kubectl get nodes --no-headers 2>/dev/null | grep -q " Ready "; do sleep 3; done'
+    hint: |
+      k3s did not become ready within the probe timeout.
+      Run `limactl shell k3s-lab -- sudo systemctl status k3s` to inspect.
+
+message: |
+  k3s is running inside the Lima VM.
+
+  Next:
+    make kubeconfig    # merge k3s kubeconfig into ~/.kube/config (context: k3s-lab)
+    make bootstrap     # install ArgoCD and apply the root Application
+
+  Direct shell into the VM:
+    limactl shell k3s-lab
