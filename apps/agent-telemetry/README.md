@@ -80,23 +80,29 @@ token    = "<上で生成した token>"
 ## 外部公開 (任意)
 
 クラスタ内からしか push できない構成のため、Mac mini 以外から push したい場合は
-argocd と同じ Traefik IngressRoute + mkcert + SSH トンネル方式で公開する:
+argocd と同じ Traefik IngressRoute + mkcert + SSH トンネル方式で公開する。
+
+`manifests/ingressroute.yaml` (`telemetry.lab.local` → svc:8443、`agent-telemetry-tls` で TLS 終端)
+は ArgoCD が自動 sync する。残りはリモートクライアント側で一度だけ:
 
 ```fish
-# 証明書発行
+# 1. mkcert で証明書発行 (CA は -install 済み前提)
 mkcert -cert-file /tmp/telemetry.pem -key-file /tmp/telemetry-key.pem telemetry.lab.local
 kubectl -n agent-telemetry create secret tls agent-telemetry-tls \
   --cert=/tmp/telemetry.pem --key=/tmp/telemetry-key.pem \
   --dry-run=client -o yaml | kubectl apply -f -
 rm /tmp/telemetry*.pem
+
+# 2. hostname 解決 (SSH トンネルの local 端へ寄せる)
 echo '127.0.0.1 telemetry.lab.local' | sudo tee -a /etc/hosts
 
-# IngressRoute は manifests/ に追加 (ファイル例は infra/argocd/ingressroute.yaml 参照)
-# SSH config の LocalForward に 8443 を追加して ssh -fN lab-k8s
+# 3. SSH トンネル (argocd と同じ LocalForward 8443 を流用するので追加設定不要)
+#    ※ argocd 用に既に LocalForward 8443 127.0.0.1:8443 を入れていればそのまま使える
 ```
 
 `agent-telemetry-server` は HTTP listener なので Traefik 側で TLS 終端する点は argocd と同じ構成
-（HTTP backend + `tls.secretName` で websecure entrypoint 終端）。
+（HTTP backend + `tls.secretName` で websecure entrypoint 終端）。Lima portForward `443→8443` と
+SSH `LocalForward 8443 127.0.0.1:8443` の組み合わせで、リモートから `https://telemetry.lab.local:8443` に到達する。
 
 ## ConfigMap の更新
 
