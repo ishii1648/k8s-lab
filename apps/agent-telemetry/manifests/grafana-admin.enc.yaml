@@ -1,0 +1,26 @@
+apiVersion: isindir.github.com/v1alpha3
+kind: SopsSecret
+metadata:
+    name: agent-telemetry-grafana-admin
+    namespace: agent-telemetry
+spec:
+    secretTemplates:
+        - name: agent-telemetry-grafana-admin
+          stringData:
+            admin-user: ENC[AES256_GCM,data:VDZWvD0=,iv:jsodUSVZpsJ1ae9kmV+029GcBdFQmcXprGDW/F3Gvms=,tag:7FK1p5eNL7p4sWlEaxg98Q==,type:str]
+            admin-password: ENC[AES256_GCM,data:HqbAKXXtiEfx69YZxhLVezNhH7Tx+Q9g18Bltxu04qpkwq7jT6ohnpZYyMNKtnds,iv:lI1VoF01avnOXeP3qhcQFTZynSPaSZ6uWcmARjXXuG8=,tag:4U3YXR8cdKaAPpFQ+NN5jA==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBVaHFnaUpEU2dDdzhuN2Fl
+            YkxFZ1BmSmdUZFFqVGJld2xOaEZXMjNQbkVFCm5xb2VTTDVWZC96Vk45bkE4d0U5
+            WGZTb29QVExidWR0QWVxU296ejZXTEkKLS0tIG01UWo3cWRIUkF6SFVjT3JpM3dX
+            aXp4QmxaMWxwWlRVb1czSnNxNWd6WTAKeSU7L0v5p2ZVUWHDFq5/qB9N9Sh6Y08g
+            TzICXW2sEeBEvV8zn8DkVxfVfxxLhEyLbcEDPMzbTd99nipL/X7eDQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1w0w47shfc9mntx8rgzqjq8qc500cmunxj7pq8nfdt40wjn2gjqzq0c3m9d
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-05-10T15:42:32Z"
+    mac: ENC[AES256_GCM,data:Tm5zF6Rha3LRH27szPX4AqoeLOJqWtey1PD49ayBWEuHG8zr8ERe/Xm/h+quPPFDgitI0umXw63wt+rMpFw1ILDFYxef30/Fb7TQhJtebJ3lWEwXEGbdoISerNqAqAbhx5GJEN25NUaGBEJRQW6bnbKRYIwgX/iT+iUxhXKeLII=,iv:BWPj9ttFbpwfFCS6GU7E81nuRqGG8y9FDSelcSlUnpM=,tag:+0Zc4jO+nS42xavxcX6iMw==,type:str]
+    version: 3.13.0
