@@ -60,6 +60,16 @@ spec:
               value: "true"
             - name: GF_AUTH_ANONYMOUS_ORG_ROLE
               value: "Viewer"
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: agent-telemetry-grafana-admin
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agent-telemetry-grafana-admin
+                  key: admin-password
           volumeMounts:
             - name: data
               mountPath: /var/lib/grafana

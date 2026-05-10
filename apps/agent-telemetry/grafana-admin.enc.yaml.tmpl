@@ -1,0 +1,23 @@
+# Template for apps/agent-telemetry/manifests/grafana-admin.enc.yaml.
+# Grafana の admin login (dashboard 編集用) credentials。匿名 Viewer は残したまま併用する。
+# Workflow:
+#   1. cp apps/agent-telemetry/grafana-admin.enc.yaml.tmpl apps/agent-telemetry/manifests/grafana-admin.enc.yaml
+#   2. password を生成して埋め込む (admin-user は通常 admin 固定):
+#        set pw (openssl rand -hex 24)
+#        sed -i '' "s/REPLACE_WITH_OPENSSL_RAND_HEX_24/$pw/" apps/agent-telemetry/manifests/grafana-admin.enc.yaml
+#        echo $pw   # 1Password などに保管
+#   3. sops --encrypt --in-place apps/agent-telemetry/manifests/grafana-admin.enc.yaml
+#   4. git add / commit / push
+#
+# This template lives outside `manifests/` so ArgoCD never tries to apply the plaintext.
+apiVersion: isindir.github.com/v1alpha3
+kind: SopsSecret
+metadata:
+  name: agent-telemetry-grafana-admin
+  namespace: agent-telemetry
+spec:
+  secretTemplates:
+    - name: agent-telemetry-grafana-admin
+      stringData:
+        admin-user: admin
+        admin-password: REPLACE_WITH_OPENSSL_RAND_HEX_24

@@ -18,7 +18,9 @@ Grafana 側 datasource は `frser-sqlite-datasource`（SQLite ファイル直読
 |---|---|---|
 | Namespace `agent-telemetry` | (ArgoCD 自動作成) | `CreateNamespace=true` |
 | Secret `agent-telemetry-server-token` | SopsSecret 経由で sops-secrets-operator が生成 | git に暗号化済 `secret.enc.yaml` をコミット (下記参照) |
-| Secret `agent-telemetry-tls` | SopsSecret 経由 (mkcert で発行した cert/key を SOPS 暗号化) | 外部公開する場合のみ。`tls.enc.yaml` をコミット ([外部公開](#外部公開-任意) 参照) |
+| Secret `agent-telemetry-tls` | SopsSecret 経由 (mkcert で発行した cert/key を SOPS 暗号化) | telemetry 外部公開時のみ。`tls.enc.yaml` をコミット ([外部公開](#外部公開-任意) 参照) |
+| Secret `agent-telemetry-grafana-tls` | SopsSecret 経由 (mkcert で発行した cert/key を SOPS 暗号化) | grafana 外部公開時のみ。`grafana-tls.enc.yaml` をコミット ([Grafana 外部公開](#grafana-外部公開-任意) 参照) |
+| Secret `agent-telemetry-grafana-admin` | SopsSecret 経由 (admin user / password を SOPS 暗号化) | grafana 外部公開時のみ。`grafana-admin.enc.yaml` をコミット |
 | PVC `agent-telemetry-data` | 5Gi / `local-path` / RWO | SQLite DB + Grafana state を相乗り |
 | ConfigMap `agent-telemetry-grafana-provisioning` | datasource + dashboard provider 定義 | 上流 `grafana/provisioning/` のコピー |
 | ConfigMap `agent-telemetry-grafana-dashboards` | dashboard JSON 本体 | 上流 `grafana/dashboards/agent-telemetry.json` のコピー (16 KB) |
@@ -114,6 +116,49 @@ git push
 `agent-telemetry-server` は HTTP listener なので Traefik 側で TLS 終端する点は argocd と同じ構成
 （HTTP backend + `tls.secretName` で websecure entrypoint 終端）。Lima portForward `443→8443` と
 SSH `LocalForward 8443 127.0.0.1:8443` の組み合わせで、リモートから `https://telemetry.lab.local:8443` に到達する。
+
+## Grafana 外部公開 (任意)
+
+dashboard 編集や常時閲覧用に Grafana sidecar (`:3000`) を `https://grafana.lab.local:8443` で
+外部公開する。telemetry と同じ Traefik :8443 + SSH `LocalForward 8443` を共有 (Host ヘッダで分岐)
+するので SSH トンネルの追加設定は不要。
+
+`manifests/ingressroute-grafana.yaml` (`grafana.lab.local` → svc:3000、`agent-telemetry-grafana-tls`
+で TLS 終端) は ArgoCD が自動 sync する。匿名 Viewer (`GF_AUTH_ANONYMOUS_ENABLED=true`) は維持し、
+dashboard 編集時のみ admin login を併用する構成にしてある。
+
+リモートクライアント側で一度だけ:
+
+```fish
+# 1. mkcert で grafana 用証明書発行 (CA は -install 済み前提)
+mkcert -cert-file /tmp/grafana.pem -key-file /tmp/grafana-key.pem grafana.lab.local
+
+# 2. テンプレに PEM を埋め込み → 暗号化してコミット
+cp apps/agent-telemetry/grafana-tls.enc.yaml.tmpl apps/agent-telemetry/manifests/grafana-tls.enc.yaml
+$EDITOR apps/agent-telemetry/manifests/grafana-tls.enc.yaml   # REPLACE_WITH_TLS_*_PEM を /tmp/grafana*.pem の中身に置換
+sops --encrypt --in-place apps/agent-telemetry/manifests/grafana-tls.enc.yaml
+rm /tmp/grafana*.pem
+
+# 3. admin password を生成 → 暗号化してコミット (1Password などに password を控える)
+cp apps/agent-telemetry/grafana-admin.enc.yaml.tmpl apps/agent-telemetry/manifests/grafana-admin.enc.yaml
+set pw (openssl rand -hex 24)
+sed -i '' "s/REPLACE_WITH_OPENSSL_RAND_HEX_24/$pw/" apps/agent-telemetry/manifests/grafana-admin.enc.yaml
+echo $pw   # 1Password に保管
+sops --encrypt --in-place apps/agent-telemetry/manifests/grafana-admin.enc.yaml
+
+# 4. hostname 解決
+echo '127.0.0.1 grafana.lab.local' | sudo tee -a /etc/hosts
+sudo killall -HUP mDNSResponder
+
+# 5. commit & push (ArgoCD が SopsSecret を sync → operator が grafana-tls / grafana-admin Secret を生成)
+git add apps/agent-telemetry/manifests/grafana-tls.enc.yaml apps/agent-telemetry/manifests/grafana-admin.enc.yaml
+git commit -m "feat(agent-telemetry): add encrypted grafana TLS + admin secrets"
+git push
+```
+
+ブラウザで `https://grafana.lab.local:8443` にアクセスすると mkcert CA で TLS 検証が通り、
+匿名 Viewer として dashboard を閲覧できる。右上から `admin` / `<生成した password>` で login すれば
+編集権限が得られる。
 
 ## ConfigMap の更新
 

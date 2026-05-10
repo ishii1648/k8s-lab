@@ -1,0 +1,26 @@
+# Template for apps/agent-telemetry/manifests/grafana-tls.enc.yaml.
+# mkcert で発行した Grafana 用 cert/key を SopsSecret として暗号化し git で管理する。
+# Workflow (mkcert CA を `-install` 済みのリモートクライアント側で実行):
+#
+#   1. mkcert -cert-file /tmp/grafana.pem -key-file /tmp/grafana-key.pem grafana.lab.local
+#   2. cp apps/agent-telemetry/grafana-tls.enc.yaml.tmpl apps/agent-telemetry/manifests/grafana-tls.enc.yaml
+#   3. PEM を埋め込む (改行・インデントを保つこと):
+#        awk '{print "          "$0}' /tmp/grafana.pem      # → tls.crt の値に貼る
+#        awk '{print "          "$0}' /tmp/grafana-key.pem  # → tls.key の値に貼る
+#   4. sops --encrypt --in-place apps/agent-telemetry/manifests/grafana-tls.enc.yaml
+#   5. rm /tmp/grafana*.pem
+#   6. git add / commit / push
+apiVersion: isindir.github.com/v1alpha3
+kind: SopsSecret
+metadata:
+  name: agent-telemetry-grafana-tls
+  namespace: agent-telemetry
+spec:
+  secretTemplates:
+    - name: agent-telemetry-grafana-tls
+      type: kubernetes.io/tls
+      stringData:
+        tls.crt: |
+          REPLACE_WITH_TLS_CRT_PEM
+        tls.key: |
+          REPLACE_WITH_TLS_KEY_PEM
