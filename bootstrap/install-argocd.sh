@@ -39,6 +39,16 @@ kubectl -n "${ARGOCD_NAMESPACE}" wait --for=condition=Available --timeout=300s \
   deployment/argocd-notifications-controller \
   deployment/argocd-dex-server
 
+echo "==> Applying argocd-cmd-params-cm (server.insecure=true for Traefik TLS termination)"
+kubectl apply -f "${REPO_ROOT}/infra/argocd/argocd-cmd-params-cm.yaml"
+kubectl -n "${ARGOCD_NAMESPACE}" rollout restart deployment/argocd-server
+kubectl -n "${ARGOCD_NAMESPACE}" rollout status  deployment/argocd-server --timeout=120s
+
+echo "==> Applying Traefik IngressRoute for argocd.lab.local"
+echo "    NOTE: requires Secret 'argocd-tls' in namespace ${ARGOCD_NAMESPACE}."
+echo "          See infra/argocd/README.md for the mkcert setup."
+kubectl apply -f "${REPO_ROOT}/infra/argocd/ingressroute.yaml"
+
 echo "==> Applying root Application (app-of-apps)"
 kubectl apply -f "${REPO_ROOT}/infra/root-app/root-application.yaml"
 
@@ -46,6 +56,6 @@ echo
 echo "ArgoCD is installed. To view the admin password:"
 echo "  kubectl -n ${ARGOCD_NAMESPACE} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo"
 echo
-echo "To access the UI via port-forward:"
-echo "  kubectl -n ${ARGOCD_NAMESPACE} port-forward svc/argocd-server 8080:443"
-echo "  open https://localhost:8080  (user: admin)"
+echo "Access the UI:  https://argocd.lab.local:8443  (user: admin)"
+echo "  Requires: SSH tunnel up (LocalForward 8443) + argocd-tls Secret + /etc/hosts entry."
+echo "  See README.md (\"ArgoCD UI\" section) for the one-time setup."

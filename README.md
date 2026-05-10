@@ -38,12 +38,53 @@ curl http://localhost:8080
 
 ## ArgoCD UI
 
+Traefik IngressRoute + mkcert で TLS 終端し、SSH トンネル経由で `https://argocd.lab.local:8443` に固定 URL で常時接続する構成 ([SSH トンネル](#リモートマシンから-kubectl-する-ssh-トンネル) が前提)。
+
+### 一度だけのセットアップ (リモートマシン側)
+
 ```fish
-make argocd-password   # 初期 admin パスワードを表示
-make argocd-ui         # https://localhost:8080 で port-forward
+brew install mkcert nss
+mkcert -install                                  # macOS keychain に local CA 登録 (sudo)
+
+# サーバ証明書を発行 → クラスタに Secret として登録
+mkcert -cert-file /tmp/argocd.pem -key-file /tmp/argocd-key.pem argocd.lab.local
+kubectl -n argocd create secret tls argocd-tls \
+  --cert=/tmp/argocd.pem --key=/tmp/argocd-key.pem \
+  --dry-run=client -o yaml | kubectl apply -f -
+rm /tmp/argocd*.pem
+
+# hostname 解決
+echo '127.0.0.1 argocd.lab.local' | sudo tee -a /etc/hosts
 ```
 
-ブラウザで `https://localhost:8080` を開き、`admin` + 上記パスワードでログイン。
+`bootstrap/install-argocd.sh` 内で `argocd-cmd-params-cm` (`server.insecure: "true"`) と `IngressRoute` は自動適用される。
+
+### Mac mini 側 (Lima portForward)
+
+`lima/k3s.yaml` に Traefik :443 の portForward を入れているが、既存 VM には個別反映が必要:
+
+```fish
+limactl edit k3s-lab        # portForwards に 443→8443 を追加
+limactl restart k3s-lab
+```
+
+### SSH トンネル (リモートマシン側)
+
+`~/.ssh/config` の `Host lab-k8s` に `LocalForward 8443 127.0.0.1:8443` を追加し、トンネルを再起動:
+
+```fish
+pkill -f 'ssh -fN lab-k8s'
+ssh -fN lab-k8s
+```
+
+### 接続
+
+```fish
+make argocd-password         # admin パスワード
+open https://argocd.lab.local:8443
+```
+
+ブラウザ警告は出ない (mkcert CA が keychain で trust されているため)。
 
 ## リモートマシンから kubectl する (SSH トンネル)
 

@@ -30,6 +30,10 @@ portForwards:
   - guestPort: 6443
     hostIP: "127.0.0.1"
     hostPort: 6443
+  # Traefik websecure (HTTPS). Used for ingress (e.g. ArgoCD UI) over SSH tunnel.
+  - guestPort: 443
+    hostIP: "127.0.0.1"
+    hostPort: 8443
 
 provision:
   # Install k3s as a single-node server with a stable channel.
