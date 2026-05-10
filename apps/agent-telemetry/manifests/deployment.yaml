@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-telemetry
+  namespace: agent-telemetry
+  labels:
+    app: agent-telemetry
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agent-telemetry
+  template:
+    metadata:
+      labels:
+        app: agent-telemetry
+    spec:
+      containers:
+        - name: server
+          image: ghcr.io/ishii1648/agent-telemetry-server:latest
+          args:
+            - "--listen"
+            - ":8443"
+            - "--data-dir"
+            - "/var/lib/agent-telemetry"
+          ports:
+            - name: ingest
+              containerPort: 8443
+          env:
+            - name: AGENT_TELEMETRY_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-telemetry-server-token
+                  key: token
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/agent-telemetry
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: ingest
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+        - name: grafana
+          image: grafana/grafana-oss:11.5.2
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: GF_INSTALL_PLUGINS
+              value: "frser-sqlite-datasource"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: "Viewer"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/datasources/agent-telemetry.yaml
+              subPath: datasources.yaml
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/agent-telemetry.yaml
+              subPath: dashboards.yaml
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: agent-telemetry-data
+        - name: provisioning
+          configMap:
+            name: agent-telemetry-grafana-provisioning
+        - name: dashboards
+          configMap:
+            name: agent-telemetry-grafana-dashboards

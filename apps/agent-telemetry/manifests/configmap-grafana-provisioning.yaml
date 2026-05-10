@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-telemetry-grafana-provisioning
+  namespace: agent-telemetry
+data:
+  datasources.yaml: |
+    apiVersion: 1
+
+    datasources:
+      - name: agent-telemetry
+        uid: agent-telemetry
+        type: frser-sqlite-datasource
+        access: proxy
+        isDefault: false
+        jsonData:
+          path: /var/lib/grafana/agent-telemetry.db
+        editable: true
+  dashboards.yaml: |
+    apiVersion: 1
+
+    providers:
+      - name: agent-telemetry
+        orgId: 1
+        folder: agent-telemetry
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 5
+        options:
+          path: /var/lib/grafana/dashboards
+          foldersFromFilesStructure: false
