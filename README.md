@@ -45,6 +45,66 @@ make argocd-ui         # https://localhost:8080 で port-forward
 
 ブラウザで `https://localhost:8080` を開き、`admin` + 上記パスワードでログイン。
 
+## リモートマシンから kubectl する (SSH トンネル)
+
+k3s API server は Lima の `portForwards` で `hostIP: "127.0.0.1"` に bind しているため、Mac mini ローカル以外からは直接届かない。リモートマシンから操作したい場合は以下の選択肢がある。
+
+| 方法 | 安全性 | 手間 | 備考 |
+|---|---|---|---|
+| SSH トンネル | 高 (既存 sshd 経由) | 軽 | 推奨。LAN/WAN どちらでも可 |
+| Lima を LAN 公開 | 中 (要 IP 制限) | 中 | `hostIP: "0.0.0.0"` に変更し TLS SAN を追加 |
+| VPN (Tailscale 等) | 高 | 重 | 既に VPN を運用しているなら自然 |
+
+以下は SSH トンネルの手順。`<Mac mini host>` は実機の到達可能なホスト名に置換する (例: Bonjour 名 / LAN IP)。
+
+### 1. kubeconfig をリモート側に取得
+
+```fish
+scp <Mac mini host>:~/.kube/config ~/.kube/config-k3s-lab
+chmod 600 ~/.kube/config-k3s-lab
+```
+
+### 2. リモート側 `~/.ssh/config` に常用エントリを追加
+
+```fish
+printf '%s\n' \
+  '' \
+  'Host k3s-lab-tunnel' \
+  '  HostName <Mac mini host>' \
+  '  User <your user>' \
+  '  LocalForward 6443 127.0.0.1:6443' \
+  '  ServerAliveInterval 30' \
+  '  ExitOnForwardFailure yes' \
+  | tee -a ~/.ssh/config
+```
+
+### 3. トンネル起動
+
+```fish
+ssh -N k3s-lab-tunnel        # フォアグラウンド (Ctrl-C で停止)
+# or
+ssh -fN k3s-lab-tunnel       # バックグラウンド
+```
+
+### 4. kubectl 実行
+
+```fish
+set -x KUBECONFIG ~/.kube/config-k3s-lab
+kubectl get nodes
+```
+
+### ローカル 6443 が他で使われている場合
+
+`LocalForward` のホスト側ポートを別に振り、kubeconfig の `server` も合わせる:
+
+```fish
+# ~/.ssh/config の LocalForward を以下に変更
+#   LocalForward 16443 127.0.0.1:6443
+
+# kubeconfig の server を書き換え
+sed -i '' 's|server: https://127.0.0.1:6443|server: https://127.0.0.1:16443|' ~/.kube/config-k3s-lab
+```
+
 ## ライフサイクル
 
 | 操作 | コマンド | 影響 |
