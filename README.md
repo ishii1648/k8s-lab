@@ -66,12 +66,12 @@ chmod 600 ~/.kube/config-k3s-lab
 
 ### 2. リモート側 `~/.ssh/config` に常用エントリを追加
 
-`Host` 名は任意のエイリアス。ここでは「接続先ホスト + 用途」で `mac-mini-k3s` とする。
+`Host` 名は任意のエイリアス。ここでは短く `lab-k8s` とする。
 
 ```fish
 printf '%s\n' \
   '' \
-  'Host mac-mini-k3s' \
+  'Host lab-k8s' \
   '  HostName <Mac mini host>' \
   '  User <your user>' \
   '  LocalForward 6443 127.0.0.1:6443' \
@@ -83,9 +83,9 @@ printf '%s\n' \
 ### 3. トンネル起動
 
 ```fish
-ssh -N mac-mini-k3s        # フォアグラウンド (Ctrl-C で停止)
+ssh -N lab-k8s        # フォアグラウンド (Ctrl-C で停止)
 # or
-ssh -fN mac-mini-k3s       # バックグラウンド
+ssh -fN lab-k8s       # バックグラウンド
 ```
 
 ### 4. kubectl 実行
