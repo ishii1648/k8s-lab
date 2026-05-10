@@ -161,6 +161,71 @@ kubectl get nodes
 kubectl config set-cluster k3s-lab --server=https://127.0.0.1:16443
 ```
 
+## SOPS + age による Secret 管理
+
+各アプリの Secret は `*.enc.yaml` として暗号化したまま git にコミットし、クラスタ内の
+`sops-secrets-operator` が `SopsSecret` CRD を解読して通常の Secret を生成する。
+KMS は使わず、復号鍵は age 1 ファイル ([age](https://github.com/FiloSottile/age) の X25519 keypair) で完結する。
+
+- リポジトリルートの `.sops.yaml` が暗号化ルール (path / encrypted_regex / age public key) を定義
+- `apps/sops-secrets-operator/application.yaml` が operator (helm chart 0.26.0) を ArgoCD で展開
+- operator は `sops-secrets-operator/sops-age` Secret から age private key を読む。
+  これがクラスタで唯一手動作成が要る Secret
+
+### 一度だけのセットアップ
+
+前提: `~/.config/aquaproj-aqua/aqua.yaml` に `getsops/sops` と `FiloSottile/age` が登録済み。
+未インストールなら `aqua i` で取得する (homebrew の `brew install age sops` でも可)。
+
+```fish
+aqua i   # sops + age をインストール (既にあればスキップ)
+
+# 1. age keypair を生成 (private key は ~/.config/sops/age/keys.txt のみに置く)
+mkdir -p ~/.config/sops/age
+age-keygen -o ~/.config/sops/age/keys.txt
+# 出力の `# public key: age1xxxx...` を控える
+
+# 2. .sops.yaml の `REPLACE_WITH_AGE_PUBLIC_KEY` を public key で置換してコミット
+$EDITOR .sops.yaml
+git add .sops.yaml
+git commit -m "chore(sops): set age recipient"
+
+# 3. クラスタに private key Secret を作成 (operator が起動時に読む)
+kubectl create namespace sops-secrets-operator --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n sops-secrets-operator create secret generic sops-age \
+  --from-file=keys.txt=$HOME/.config/sops/age/keys.txt \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 4. private key を別所にバックアップ (1Password / 暗号化 USB / 別 Mac など)
+#    Lima VM を作り直したらこのファイルから手順 3 を再実行する
+```
+
+### 個別アプリの Secret を追加・更新する
+
+各アプリ配下の `secret.enc.yaml.tmpl` を `manifests/secret.enc.yaml` にコピーして編集後、
+`sops --encrypt --in-place` で暗号化してコミットする。例は
+[apps/agent-telemetry/README.md](apps/agent-telemetry/README.md#初回セットアップ) を参照。
+
+既存の暗号化済ファイルを編集するときは `sops apps/.../secret.enc.yaml` で開けば
+平文を編集 → 保存時に再暗号化される (フィールド単位なので git diff も最小)。
+
+### 鍵ローテ
+
+```fish
+# 新しい keypair を生成 → public key を .sops.yaml に追記
+age-keygen -o ~/.config/sops/age/keys-new.txt
+cat ~/.config/sops/age/keys-new.txt >> ~/.config/sops/age/keys.txt
+
+# 全 *.enc.yaml を新公開鍵で再暗号化 (旧鍵で復号できるうちに走らせる)
+find . -name '*.enc.yaml' -not -path '*/.git/*' -exec sops updatekeys -y {} \;
+
+# クラスタの sops-age Secret を更新 → operator pod を再起動
+kubectl -n sops-secrets-operator create secret generic sops-age \
+  --from-file=keys.txt=$HOME/.config/sops/age/keys.txt \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n sops-secrets-operator rollout restart deployment/sops-secrets-operator
+```
+
 ## ライフサイクル
 
 | 操作 | コマンド | 影響 |
@@ -175,6 +240,7 @@ kubectl config set-cluster k3s-lab --server=https://127.0.0.1:16443
 .
 ├── Makefile                    # 主要操作 (make help で一覧)
 ├── README.md
+├── .sops.yaml                  # SOPS 暗号化ルール (age public key)
 ├── docs/
 │   └── issues.md               # 受け入れ条件と検証手順
 ├── lima/
@@ -190,6 +256,8 @@ kubectl config set-cluster k3s-lab --server=https://127.0.0.1:16443
 │       └── root-application.yaml   # apps/ を再帰 sync
 ├── apps/
 │   ├── README.md
+│   ├── sops-secrets-operator/  # SopsSecret を解読する operator (helm chart)
+│   │   └── application.yaml
 │   └── hello-world/            # サンプル個人アプリ (echo server)
 │       ├── application.yaml
 │       └── manifests/

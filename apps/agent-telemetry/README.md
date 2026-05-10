@@ -17,7 +17,8 @@ Grafana 側 datasource は `frser-sqlite-datasource`（SQLite ファイル直読
 | リソース | 種類 | 備考 |
 |---|---|---|
 | Namespace `agent-telemetry` | (ArgoCD 自動作成) | `CreateNamespace=true` |
-| Secret `agent-telemetry-server-token` | **手動作成** | git にコミットしない (下記参照) |
+| Secret `agent-telemetry-server-token` | SopsSecret 経由で sops-secrets-operator が生成 | git に暗号化済 `secret.enc.yaml` をコミット (下記参照) |
+| Secret `agent-telemetry-tls` | SopsSecret 経由 (mkcert で発行した cert/key を SOPS 暗号化) | 外部公開する場合のみ。`tls.enc.yaml` をコミット ([外部公開](#外部公開-任意) 参照) |
 | PVC `agent-telemetry-data` | 5Gi / `local-path` / RWO | SQLite DB + Grafana state を相乗り |
 | ConfigMap `agent-telemetry-grafana-provisioning` | datasource + dashboard provider 定義 | 上流 `grafana/provisioning/` のコピー |
 | ConfigMap `agent-telemetry-grafana-dashboards` | dashboard JSON 本体 | 上流 `grafana/dashboards/agent-telemetry.json` のコピー (16 KB) |
@@ -26,44 +27,46 @@ Grafana 側 datasource は `frser-sqlite-datasource`（SQLite ファイル直読
 
 ## 初回セットアップ
 
-ArgoCD が同期する前に Secret を手動作成する。Pod は Secret が無いと起動できないため、
-sync で Namespace が出来てから手で `kubectl create secret` する流れ:
+Secret は SOPS + age で暗号化した `SopsSecret` を git にコミットし、クラスタ内の
+`sops-secrets-operator` が解読して通常の Secret を生成する。クラスタ全体の age 鍵セットアップは
+ルート [README.md](../../README.md#sops--age-による-secret-管理) を参照。
+
+このアプリ固有の手順:
 
 ```fish
-# 1. token 生成 (クライアント ~/.claude/agent-telemetry.toml の [server] token と同値)
+# 1. テンプレを manifests/ にコピー
+cp apps/agent-telemetry/secret.enc.yaml.tmpl apps/agent-telemetry/manifests/secret.enc.yaml
+
+# 2. token を生成して埋め込む
 set token (openssl rand -hex 32)
+sed -i '' "s/REPLACE_WITH_OPENSSL_RAND_HEX_32/$token/" apps/agent-telemetry/manifests/secret.enc.yaml
 
-# 2. namespace を先に作る (ArgoCD 同期を待たずに進めたいとき)
-kubectl create namespace agent-telemetry --dry-run=client -o yaml | kubectl apply -f -
-
-# 3. Secret を作成
-kubectl -n agent-telemetry create secret generic agent-telemetry-server-token \
-  --from-literal=token=$token \
-  --dry-run=client -o yaml | kubectl apply -f -
+# 3. SOPS で暗号化 (リポジトリ root の .sops.yaml に従う)
+sops --encrypt --in-place apps/agent-telemetry/manifests/secret.enc.yaml
 
 # 4. token をクライアント側に控える
 echo $token
+
+# 5. commit & push
+git add apps/agent-telemetry/manifests/secret.enc.yaml
+git commit -m "feat(agent-telemetry): add encrypted server token"
+git push
 ```
 
-`git push` で `application.yaml` が root から sync されると、Deployment は Secret を読んで起動する。
-Secret 未作成のまま sync すると Pod は `CreateContainerConfigError` で再試行するので、Secret を作れば自動復旧する。
+push 後、ArgoCD が `SopsSecret` を sync → operator が `agent-telemetry-server-token` Secret を生成 →
+Deployment が起動する。`secret.enc.yaml` が無い間は Pod が `CreateContainerConfigError` で再試行する。
 
 ## 動作確認
 
+Pod の sync / health は ArgoCD UI (`https://argocd.lab.local:8443`) で確認する。
+外部からの動作確認は [外部公開](#外部公開-任意) が完了している前提で:
+
 ```fish
-kubectl -n agent-telemetry rollout status deployment/agent-telemetry
-
-# server 側 (ingest endpoint)
-kubectl -n agent-telemetry port-forward svc/agent-telemetry 8443:8443
-# 別ターミナルで
-curl -k https://localhost:8443/healthz   # → ok
-
-# grafana 側 (dashboard 閲覧)
-kubectl -n agent-telemetry port-forward svc/agent-telemetry 3000:3000
-open http://localhost:3000               # 匿名 Viewer 権限で開く
+curl -k https://telemetry.lab.local:8443/healthz   # → ok
 ```
 
-dashboard `agent-telemetry/Coding agent token 効率ダッシュボード` が provisioning から自動登録される。
+dashboard `agent-telemetry/Coding agent token 効率ダッシュボード` は provisioning から自動登録される
+(Grafana は IngressRoute から閲覧)。
 
 ## クライアント設定
 
@@ -83,20 +86,28 @@ token    = "<上で生成した token>"
 argocd と同じ Traefik IngressRoute + mkcert + SSH トンネル方式で公開する。
 
 `manifests/ingressroute.yaml` (`telemetry.lab.local` → svc:8443、`agent-telemetry-tls` で TLS 終端)
-は ArgoCD が自動 sync する。残りはリモートクライアント側で一度だけ:
+は ArgoCD が自動 sync する。TLS Secret も `manifests/tls.enc.yaml` (SopsSecret) で git 管理されるので、
+クライアント側の `kubectl create` は不要。リモートクライアント側で一度だけ:
 
 ```fish
 # 1. mkcert で証明書発行 (CA は -install 済み前提)
 mkcert -cert-file /tmp/telemetry.pem -key-file /tmp/telemetry-key.pem telemetry.lab.local
-kubectl -n agent-telemetry create secret tls agent-telemetry-tls \
-  --cert=/tmp/telemetry.pem --key=/tmp/telemetry-key.pem \
-  --dry-run=client -o yaml | kubectl apply -f -
+
+# 2. テンプレに PEM を埋め込み → 暗号化してコミット
+cp apps/agent-telemetry/tls.enc.yaml.tmpl apps/agent-telemetry/manifests/tls.enc.yaml
+$EDITOR apps/agent-telemetry/manifests/tls.enc.yaml   # REPLACE_WITH_TLS_*_PEM を /tmp/telemetry*.pem の中身に置換
+sops --encrypt --in-place apps/agent-telemetry/manifests/tls.enc.yaml
 rm /tmp/telemetry*.pem
 
-# 2. hostname 解決 (SSH トンネルの local 端へ寄せる)
+# 3. hostname 解決 (SSH トンネルの local 端へ寄せる)
 echo '127.0.0.1 telemetry.lab.local' | sudo tee -a /etc/hosts
 
-# 3. SSH トンネル (argocd と同じ LocalForward 8443 を流用するので追加設定不要)
+# 4. commit & push (ArgoCD が SopsSecret を sync → operator が agent-telemetry-tls Secret を生成)
+git add apps/agent-telemetry/manifests/tls.enc.yaml
+git commit -m "feat(agent-telemetry): add encrypted TLS secret"
+git push
+
+# 5. SSH トンネル (argocd と同じ LocalForward 8443 を流用するので追加設定不要)
 #    ※ argocd 用に既に LocalForward 8443 127.0.0.1:8443 を入れていればそのまま使える
 ```
 

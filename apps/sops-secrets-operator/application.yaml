@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sops-secrets-operator
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # Provision before any Application that depends on the SopsSecret CRD.
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  project: default
+  source:
+    repoURL: https://isindir.github.io/sops-secrets-operator/
+    chart: sops-secrets-operator
+    targetRevision: 0.26.0
+    helm:
+      releaseName: sops-secrets-operator
+      values: |
+        extraEnv:
+          - name: SOPS_AGE_KEY_FILE
+            value: /etc/sops-age/keys.txt
+        secretsAsFiles:
+          - name: sops-age
+            mountPath: /etc/sops-age
+            secretName: sops-age
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sops-secrets-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

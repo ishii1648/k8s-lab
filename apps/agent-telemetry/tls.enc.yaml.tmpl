@@ -1,0 +1,26 @@
+# Template for apps/agent-telemetry/manifests/tls.enc.yaml.
+# mkcert で発行した cert/key を SopsSecret として暗号化し git で管理する。
+# Workflow (mkcert CA を `-install` 済みのリモートクライアント側で実行):
+#
+#   1. mkcert -cert-file /tmp/telemetry.pem -key-file /tmp/telemetry-key.pem telemetry.lab.local
+#   2. cp apps/agent-telemetry/tls.enc.yaml.tmpl apps/agent-telemetry/manifests/tls.enc.yaml
+#   3. PEM を埋め込む (改行・インデントを保つこと):
+#        awk '{print "          "$0}' /tmp/telemetry.pem      # → tls.crt の値に貼る
+#        awk '{print "          "$0}' /tmp/telemetry-key.pem  # → tls.key の値に貼る
+#   4. sops --encrypt --in-place apps/agent-telemetry/manifests/tls.enc.yaml
+#   5. rm /tmp/telemetry*.pem
+#   6. git add / commit / push
+apiVersion: isindir.github.com/v1alpha3
+kind: SopsSecret
+metadata:
+  name: agent-telemetry-tls
+  namespace: agent-telemetry
+spec:
+  secretTemplates:
+    - name: agent-telemetry-tls
+      type: kubernetes.io/tls
+      stringData:
+        tls.crt: |
+          REPLACE_WITH_TLS_CRT_PEM
+        tls.key: |
+          REPLACE_WITH_TLS_KEY_PEM
