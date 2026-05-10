@@ -154,11 +154,24 @@ sudo killall -HUP mDNSResponder
 git add apps/agent-telemetry/manifests/grafana-tls.enc.yaml apps/agent-telemetry/manifests/grafana-admin.enc.yaml
 git commit -m "feat(agent-telemetry): add encrypted grafana TLS + admin secrets"
 git push
+
+# 6. PVC に既に grafana DB がある場合 (= 既存環境への後付け) は admin password を DB 側で reset する
+#    GF_SECURITY_ADMIN_PASSWORD は first start のみ有効で、既存 DB 内の admin user 行は更新されない
+set -l pw (sops --decrypt apps/agent-telemetry/manifests/grafana-admin.enc.yaml | grep 'admin-password:' | awk '{print $2}')
+kubectl exec -n agent-telemetry deploy/agent-telemetry -c grafana -- grafana cli admin reset-admin-password "$pw"
+set -e pw
 ```
 
 ブラウザで `https://grafana.lab.local:8443` にアクセスすると mkcert CA で TLS 検証が通り、
 匿名 Viewer として dashboard を閲覧できる。右上から `admin` / `<生成した password>` で login すれば
 編集権限が得られる。
+
+### admin password を変える / DB を作り直したとき
+
+`GF_SECURITY_ADMIN_PASSWORD` は **grafana の first start (PVC の DB が空のとき) しか効かない**。
+DB 内の admin user 行は env 変更では更新されないので、後から password を変えるときは
+SopsSecret を更新したあと **必ず上記 step 6 の `grafana cli admin reset-admin-password` を一度叩く**。
+PVC ごと作り直した直後 (= 完全な first start) は env だけで反映されるので reset は不要。
 
 ## ConfigMap の更新
 
