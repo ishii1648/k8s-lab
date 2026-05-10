@@ -70,7 +70,7 @@ dashboard `agent-telemetry/Coding agent token 効率ダッシュボード` は p
 
 ## クライアント設定
 
-リモートマシンの `~/.claude/agent-telemetry.toml` に:
+リモートマシンの `~/.config/agent-telemetry/config.toml` (XDG 準拠、mode 0600 推奨) に:
 
 ```toml
 [server]
